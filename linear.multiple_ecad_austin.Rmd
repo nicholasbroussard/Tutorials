@@ -44,12 +44,6 @@ st_options(bootstrap.css     = FALSE,
            footnote          = NA,          
            subtitle.emphasis = FALSE)       
 
-df <- read.csv("2019_Multifamily_ECAD.csv", stringsAsFactors = F)
-
-#Websites
-#Data: https://data.austintexas.gov/Utilities-and-City-Services/2019-Multifamily-ECAD/feiy-7jhe
-#effect_plot(): https://cran.r-project.org/web/packages/jtools/vignettes/effect_plot.html
-#jtools: https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
 ```
 
 ```{r, echo = FALSE, include=F}
@@ -69,22 +63,22 @@ If we get significant model predictors then we'll reject the null hypothesis. Ot
 
 Data comes from the City of Austin's [Open Data Portal](https://data.austintexas.gov/). We're looking at Energy Conservation Audit and Disclosure [(ECAD)](https://austinenergy.com/ae/energy-efficiency/ecad-ordinance/for-multifamily-properties) data [(found here)]([here](https://data.austintexas.gov/Utilities-and-City-Services/2009-2013-ECAD-Residential-Energy-Audit-Data/me4f-48mc). I want to examine how average monthly energy use in kWh is effected by a multifamily residential building's year of construction, size in sft, attic insulation (R-value), and number of floors.  
 
-## Exporation and Cleaning
+## Expore and Clean
 
 First, read in the dataset. 
 
 ```{r}
 #Download from my GitHub folder.
-df <- read.csv("linear_ecad_austin.csv", stringsAsFactors = F)
+df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/linear.multiple_ecad_austin.csv", stringsAsFactors = F)
 ```
 
 Second, select the variables of interest and rename.  
 
 ```{r}
 df <- df %>%
-  select(Average.Monthly.kWh, ECAD.Year.Built, Average.Apt.Size, ECAD.R.Value, ECAD.Number.of.Floors) %>%
+  select("Average Monthly kWh", "ECAD Year Built", "Average Apt Size", "ECAD R Value", "ECAD Number of Floors") %>%
   #Let's the variables easier-to-read names.
-  setnames(old = c("Average.Monthly.kWh", "ECAD.Year.Built", "Average.Apt.Size", "ECAD.R.Value", "ECAD.Number.of.Floors"),
+  setnames(old = c("Average Monthly kWh", "ECAD Year Built", "Average Apt Size", "ECAD R Value", "ECAD Number of Floors"),
            new = c("Energy",  "YearBuilt", "Size", "RValue", "Floors"))
 ```
 
@@ -214,7 +208,7 @@ Lot's of variance, which violates the assumption of homoscedasticity. Read more 
 Scale variables in the model.
 
 
-## Modeling
+## Model
 
 First, split the data. 
 
@@ -257,7 +251,7 @@ Third, conduct graphical analysis. Analyze the coefficient effects...
 plot_summs(model, plot.distributions = T, scale = T)
 ```
 
-...then visualize the relationship between each predictor and the dependent variable.
+...then visualize the relationship between each predictor and the dependent variable...
 
 ```{r}
 aa <- effect_plot(model, pred = YearBuilt, interval = T, plot.points = T, rug = T)
@@ -265,6 +259,20 @@ bb <- effect_plot(model, pred = Size, interval = T, plot.points = T, rug = T)
 cc <- effect_plot(model, pred = RValue, interval = T, plot.points = T, rug = T)
 dd <- effect_plot(model, pred = Floors, interval = T, cat.geom = "line") #Categorical predictor
 gridExtra::grid.arrange(aa,bb,cc,dd)
+```
+
+...and look at influential values.
+
+```{r}
+ols_plot_cooksd_chart(model) 
+```
+
+Examine influential rows individually and remove as needed.
+
+```{r}
+cooksd <- cooks.distance(model)
+influential <- as.numeric(names(cooksd))[(cooksd > 4*mean(cooksd, na.rm = T))]
+head(train[influential, ], 10)
 ```
 
 Fourth, pull in fitted and residual values...
@@ -307,23 +315,7 @@ ggplot(train, aes(x=Fitted, y=Residuals)) +
 
 The distribution shows (1) centering on 0, and (2) a ["degree of scattering [that] is the same for all fitted values"](https://statisticsbyjim.com/regression/check-residual-plots-regression-analysis/). Therefore there's no indication of autocorrelation.
 
-Sixth, check for influential points.
-
-```{r}
-ols_plot_cooksd_chart(model) 
-```
-
-Examine influential rows individually... 
-
-```{r}
-cooksd <- cooks.distance(model)
-influential <- as.numeric(names(cooksd))[(cooksd > 4*mean(cooksd, na.rm = T))]
-head(train[influential, ], 10)
-```
-
-...and remove rows as needed.
-
-Seventh, and last, check the model's performance with test data. Compare RMSEs.
+Sixth, and last, check the model's performance with test data. Compare RMSEs.
 
 ```{r}
 test$Fitted <- predict(model, newdata = test)
@@ -334,7 +326,7 @@ df %>%
 The train RMSE is lower the test RMSE. No indication of overfitting.
 
 
-## Comparisons
+## Compare
 
 Run an interactive model to compare against the first model.
 

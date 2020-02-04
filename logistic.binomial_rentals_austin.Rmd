@@ -13,6 +13,7 @@ output:
 library(tidyverse)
 library(inspectdf) #inspect_na(), inspect_num()
 library(kableExtra)
+library(summarytools)
 library(scales) #percent
 library(data.table)
 library(jtools) #summ(), export_summs()
@@ -48,7 +49,7 @@ I'm asking if the likeliood of a conviction, given a legal charge, is affected b
 First, read in the df.
 
 ```{r}
-df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/binomial.logistic_rentals_austin.csv")
+df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/logistic.binomial_rentals_austin.csv")
 #https://data.austintexas.gov/City-Government/Short-Term-Rental-Legal-Outcomes/xfmy-m22z
 ```
 
@@ -87,6 +88,9 @@ df <- df %>%
 df <- df %>%
   mutate(LEGALOUTCOME = ifelse(LEGALOUTCOME=="Liable" | LEGALOUTCOME=="Closed due to Judicial / Admin Action", 0, 1))
 #0 is "not penalized", 1 is penalized. I have to code the outcome var as 0/1 for the glm().
+
+df <- df %>%
+  select(LEGALOUTCOME, DEFICIENCYTEXT, OUTSTANDINGFEE, MONTHSVIOLATIONOPEN)
 ```
 
 Fourth, inspect the categoricals.
@@ -156,8 +160,9 @@ df %>%
 and impute...
 
 ```{r}
+library(mice)
 set.seed(101)
-imp <- mice::mice(df, m = 1, maxit = 1, print = F)
+imp <- mice(df, m = 1, maxit = 1, print = F)
 df <- complete(imp)
 df$OUTSTANDINGFEE <- as.numeric(df$OUTSTANDINGFEE)
 ```
@@ -175,7 +180,7 @@ df %>%
   labs(title="Correlation Matrix")
 ```
 
-The threshold for multicolinearity of .7 not achieved. Regradless, multicolinearity is only important between predictors. 
+The threshold for multicolinearity of .7 is achieved only between reponse and predictor variables. No issue.
 
 
 ## Model 
@@ -236,100 +241,62 @@ train$residuals <- model$residuals
 
 ...and query the model.
 
-* 
+* What are the odds of penalty for cases open two months? `r train %>% filter(MONTHSVIOLATIONOPEN == 2) %>% summarise(percent(mean(fitted)))`
+* What are the odds of penalty for any given licensing violation? `r train %>% filter(DEFICIENCYTEXT=="Licensing Violation") %>% summarise(percent(mean(fitted)))`
 
+Fifth, evaluate goodness of fit. Start with running an ANOVA...
 
-Fifth, evaluate goodness of fit.
+```{r}
+library(stats)
+anova <- anova(model, test = "Chisq")
+anova
+```
+
+Null Deviance: `r model$null.deviance `
+Residual Deviance: `r anova$"Resid. Dev" `
+AIC: `r summary(model)$aic`
+
+...then run an ROC curve and a confusion matrix.
+
+```{r}
+library(ROCR)
+ROCRpred <- prediction(train$fitted, train$LEGALOUTCOME)
+ROCRperf <- performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize = T) #ROC Curve
+table(train$LEGALOUTCOME, train$fitted > 0.5) #confusion matrix
+```
+
+Sixth, and last, run a new set of predicted values from the test set, then run another confusion matrix and compare. 
+
+```{r}
+test$fitted <- predict(model, newdata = test, type = "response")
+table(test$LEGALOUTCOME, test$fitted > .5)
+```
 
 
 ## Compare
 
-
-
-
-
-
-
-
-
-Third, we'll analyze the __deviance__. The null deviance says how well the model fits when only considering the dependent variable. The residual deviance says how well the model fist by looking at all the independent variables. 
-
-You can see that there's a big difference between the null and residual Deviance. This is good... it means that adding independent variables increased the model's ability to explain variation in the dependent variable. 
-
-An ANOVA table will tell us the effect on deviance by adding each variable, one at a time. That way, you'll be able to see which variables actually mattered.
+Build another model with fewer predictors.
 
 ```{r}
-library(stats)
-anova(model, test = "Chisq")
+set.seed(101)
+model2 <- glm(LEGALOUTCOME ~ OUTSTANDINGFEE + MONTHSVIOLATIONOPEN, data = train, family = binomial(link = "logit"))
+summ(model2, exp = T, digits = 4, vifs = T)
 ```
 
-We can see that each of the independent variables significantly impacted the deviance table, because the p-values of each is far lower than a significance level of 0.05. The lower the p-value, the greater the effect of that variable on the model.
-
-Fourth, let's understand the __Fisher Scoring iterations__. In the same way that traditional linear regressions use an ordinary least squares algorithm to fit the model, logistic regression uses a maximum likelihood algorithm. The Fisher Score states how many times that algorithm looped to give us our model. 
-
-Fifth, and last, the __AIC (Akaike’s Information Criteria)__ is a measure of model parsimony. Parsimonious = Efficient = Good. The AIC is used to compare parsimony of one model to another. So if we ran other models with different independent variables, we'd compare AICs. The lowest AIC would indicate  the best (most parsimonious) model. For more info, check out [this awesome discussion](https://www.r-bloggers.com/how-do-i-interpret-the-aic/) on r-bloggers.com.    
-
-
-
-\newpage
-## Run Predictions and Test Goodness of Fit
-
-What's the model good for if not making inferences or predictions? I'd love to know, in this case, the likelihood of court penalty given the characteristics in my model.
-
-To paint this picture, I'm going to run predictions using the predict() function, then build a confusion matrix, which compares the observed values to predicted values as a goodness of fit measure.
+Compare as a side-by-side table...
 
 ```{r}
-predictions <- predict(model, type="response")
-table(test$PENALIZED, predictions > 0.5) #Use .5 as your odds ratio threshold
+export_summs(model, model2, 
+             scale = T, 
+             error_format = "[{conf.low},{conf.high}]") #Include confidence intervals for each variable.
 ```
 
-In the matrix, we can see the instances when we got it right (top left, bottom right) and when we got it wrong. Look's like our model is doing a fairly good job predicting outcomes. Altogether, we predicted correctly `r scales::percent((893+213)/(893+213+132+209))` of the time. Not bad. 
-
-Now let's run an ROC (receiver operating characteristic) curve and get the corresponding AUC (area under the curve) value.
+... and graphically by coefficients.
 
 ```{r}
-library(ROCR)
-set.seed(13)
-predROCR <- prediction(predictions, test$PENALIZED)
-roc <- performance(predROCR, measure = "tpr", x.measure = "fpr") #tpr = True Positive Rate, fpr = False Positive Rate 
-auc <- performance(predROCR, measure = "aux")
-plot(roc, colorize = TRUE)
-abline(a=0, b=1)
+plot_summs(model, model2, exp = T, partial.distributions = T)
 ```
-
-In the curve above, we want the ROC to be as far from the diagonal line as possible. We also want the AUC to be as big as possible. We can see that the ROC curve does not resemble the diagonal line, which is good. Also, our AUC is `r scales::percent(auc@y.values[[1]])`, a solid value by any standard.  
-
-
-
-
-\newpage
-## Common Errors
-
-Keep in mind these common mistakes. Make sure you've accounted for all of them during the course of your analysis. 
-
-1. Class Bias: You must split the test and train data proportionally. For example, in our data set, we made sure that the test and train data had equal proportions of both levels of the independent variable, which we designated as the "Penalized" level and "Not Penalized" level. 
-2. Using the Wrong Iteration Algorithm: The default algorithm for generalized linear models is the Fisher Score (maximum likelihood)> However, when you have rare cases in the dependent variable, [use different iteration algorithms](https://www.researchgate.net/post/Fishers_Scoring_Algorithm), such as the Firth method. 
-3. Multicolinearity: Make sure the independent variables aren't correlated beyond a correlation coefficient of 4.
-4. Overfitting: Don't control for too many variables! Be smart, and add variables to your model sparingly. 
-
-
-\newpage
-## Summary
-
-Logistic regression is a beast! 
-
-Just to recap: Anytime you want to know "whether or not" something is likely to happen, use logistic regression. 
-
-Make sure you take the following steps, while always considering the common errors listed above. 
-
-1. Conduct exploratory data analysis. Thorough exploration at the start will save you a lot of headache. Check the structure, missing values, categorical variables, numerical variables, dates, and locations.
-2. Check for correlations. Highly correlated variables should not be regressed against each other.
-3. Split the data into test and train. I use 60/40, but I've also seen a lot of people use 80/20. Your choice.
-4. Run the model.
-5. Interpret the model. Make sure you __really__ understand log odds, or else go ahead and exponentiate so you can just interpret the coefficients in terms of the actual odds ratio. 
-6. Run predictions and check for goodness of fit. I purposely left out the Hosmer Lemeshow Test... there's some conversation online about it being outdated. I find that checking our prediction accuracy rate via the confusion matrix is the most meaningful.
-7. Iterate. Iterate. Iterate.
-
 
 ## Sources
 * https://datascienceplus.com/perform-logistic-regression-in-r/
@@ -338,9 +305,11 @@ Make sure you take the following steps, while always considering the common erro
 * https://www.theanalysisfactor.com/r-glm-model-fit/
 * http://r-statistics.co/Logistic-Regression-With-R.html
 * https://webfocusinfocenter.informationbuilders.com/wfappent/TLs/TL_rstat/source/LogisticRegression43.htm
-* https://www.r-bloggers.com/how-do-i-interpret-the-aic/
+* AIC and Model Parsimony: https://www.r-bloggers.com/how-do-i-interpret-the-aic/
 * https://www.analyticsvidhya.com/blog/2015/11/beginners-guide-on-logistic-regression-in-r/
 * effect_plot in jtools: https://cran.r-project.org/web/packages/jtools/vignettes/effect_plot.html 
+* Beginner's Guide to Logistic Regression: https://www.analyticsvidhya.com/blog/2015/11/beginners-guide-on-logistic-regression-in-r/
+
 
 
 

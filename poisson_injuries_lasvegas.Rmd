@@ -11,6 +11,7 @@ output:
 
 library(tidyverse)
 library(kableExtra)
+library(summarytools)
 library(scales) #percent
 library(data.table)
 library(jtools) #summ(), export_summs()
@@ -211,8 +212,8 @@ plot_summs(model, plot.distributions = T, exp = T)
 
 ```{r}
 a <- effect_plot(model, pred = Weather, interval=T, cat.geom = "line") #Categorical predictor.
-b <- effect_plot(model, pred = Month, interval = T, plot.points = T, rug = T)
-c <- effect_plot(model, pred = Hour, interval = T, plot.points = T, rug = T)
+b <- effect_plot(model, pred = Month, interval = T, partial.residuals = T, rug = T)
+c <- effect_plot(model, pred = Hour, interval = T, partial.residuals = T, rug = T)
 
 gridExtra::grid.arrange(a,b,c, ncol = 2)
 ```
