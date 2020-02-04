@@ -11,6 +11,7 @@ output:
 
 library(tidyverse)
 library(kableExtra)
+library(inspectdf)
 library(summarytools)
 library(scales) #percent
 library(data.table)
