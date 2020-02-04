@@ -1,0 +1,348 @@
+---
+title: "Logistic Regression Tutorial"
+author: "Nick Broussard"
+date: "9/11/2019"
+output: 
+  html_document:
+    code_folding: hide
+  
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(inspectdf) #inspect_na(), inspect_num()
+library(kableExtra)
+library(scales) #percent
+library(data.table)
+library(jtools) #summ(), export_summs()
+library(interactions) #cat_plot(), interact_plot()
+
+knitr::opts_chunk$set(echo = F, 
+                      warning = F, 
+                      message = F, 
+                      error = F,
+                      results = "asis",
+                      comment = NA,
+                      prompt = F,
+                      print = "render")
+
+st_options(bootstrap.css     = FALSE,       
+           plain.ascii       = FALSE,       
+           style             = "rmarkdown", 
+           dfSummary.silent  = TRUE,        
+           footnote          = NA,          
+           subtitle.emphasis = FALSE)       
+```
+
+```{r, echo = FALSE, include=F}
+st_css()
+```
+
+A topic I find super interesting is municipal action against AirBNB, VRBO, and other (so designated) short term rental companies. In Austin, residents are supposed to registered with the City before gigging out their rooms/homes. There's virtually no incentive to register with the City, however, because the City doesn't enforce compliance. As with most government regulations, compliance is regulated through resident complaints. They have no other way of knowing if I'm doing AirBNB unless my neighbor submits some kind of complaint. City's generally (1) are understaffed, and (2) don't know how to use technology (like getting on airbnb.com and searching for homes, then comparing listings against registrations). Even without any real enforcement arm, lot's of people get turned in. To explore complaint-based enforcement, I want to use the City of Austin's ["Short Term Rental Legal Outcomes"](https://data.austintexas.gov/City-Government/Short-Term-Rental-Legal-Outcomes/xfmy-m22z) data set. Between 2018 and 2019, there are 3,472 cases listed, in which many are cited for not registering their homes before gigging.
+
+I'm asking if the likeliood of a conviction, given a legal charge, is affected by the type of charge, the fee associated with the charge, and the months the violation is open before the final judicial decision.
+
+## Explore and Clean
+
+First, read in the df.
+
+```{r}
+df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/binomial.logistic_rentals_austin.csv")
+#https://data.austintexas.gov/City-Government/Short-Term-Rental-Legal-Outcomes/xfmy-m22z
+```
+
+Second, select variables.
+
+```{r}
+df <- df %>%
+  select(-CASENUMBER, -CITATIONTYPE, -CITATIONNUMBER, -DEFICIENCYCODE, -FEEAMOUNT)
+```
+
+Third, look at the df's structure...
+
+```{r}
+glimpse(df)
+```
+...and convert variables accordingly.
+
+```{r}
+library(lubridate)
+df$VIOLATIONOPENDATE <- mdy_hms(df$VIOLATIONOPENDATE)
+df$LEGALOUTCOMEDATE <- mdy_hms(df$LEGALOUTCOMEDATE)
+#Find the number of months it takes between opening a violation and legally closing it.
+df <- df %>% 
+  mutate(MONTHSVIOLATIONOPEN = interval(VIOLATIONOPENDATE, LEGALOUTCOMEDATE)%/%months(1)) %>%
+  select(-VIOLATIONOPENDATE, -LEGALOUTCOMEDATE)
+
+#Consolidate types of deficiencies.
+df$DEFICIENCYTEXT <- as.character(df$DEFICIENCYTEXT)
+df <- df %>%
+  mutate(DEFICIENCYTEXT = case_when(str_detect(DEFICIENCYTEXT, "must obtain a license") | str_detect(DEFICIENCYTEXT, "is not licensed") ~ "Licensing Violation",
+                                    str_detect(DEFICIENCYTEXT, "may not advertise or promote") ~ "Incomplete Registration Violation",
+                                    str_detect(DEFICIENCYTEXT, "may not be used by more than") | str_detect(DEFICIENCYTEXT, "may not include the rental of less than") | str_detect(DEFICIENCYTEXT, "16 people") ~ "Occupancy Limit Violation",
+                                    str_detect(DEFICIENCYTEXT, "The advertisement required a three night minimum stay") ~ "Length of Stay Violation"))
+
+#Build binary outcome variable.
+df <- df %>%
+  mutate(LEGALOUTCOME = ifelse(LEGALOUTCOME=="Liable" | LEGALOUTCOME=="Closed due to Judicial / Admin Action", 0, 1))
+#0 is "not penalized", 1 is penalized. I have to code the outcome var as 0/1 for the glm().
+```
+
+Fourth, inspect the categoricals.
+
+```{r}
+df %>%
+  inspectdf::inspect_cat() %>%
+  show_plot()
+```
+
+Based on distributions, restrict if appropriate.
+
+```{r}
+a <- ggplot(df, aes(x = DEFICIENCYTEXT)) +
+  geom_bar(color = "midnightblue", fill = "cadetblue", alpha = .7) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+b <- ggplot(df, aes(LEGALOUTCOME)) +
+  geom_bar(color = "midnightblue", fill = "cadetblue", alpha = .7) 
+
+gridExtra::grid.arrange(a,b, ncol = 2)
+
+df <- df %>%
+  filter(DEFICIENCYTEXT != "Length of Stay Violation")
+```
+
+Fifth, inspect numerics by calling the 5-number-summary...
+
+```{r numerics}
+df %>%
+  summarytools::descr(transpose = T,
+        stats = "fivenum") %>%
+  print(headings = F,
+        method = "render")
+```
+
+...and histogram distributions...
+
+```{r}
+a <- ggplot(df, aes(MONTHSVIOLATIONOPEN)) +
+  geom_histogram(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30) 
+
+b <- ggplot(df, aes(OUTSTANDINGFEE)) +
+  geom_bar(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30) 
+
+gridExtra::grid.arrange(a,b, ncol = 2)
+
+df$OUTSTANDINGFEE[df$OUTSTANDINGFEE<=0] <- NA
+```
+
+...and for outliers.
+
+```{r}
+par(mfrow=c(1,2))
+monthsopen_outliers <- boxplot(df$MONTHSVIOLATIONOPEN)$out
+fee_outliers <- boxplot(df$OUTSTANDINGFEE)$out
+```
+
+Sixth, check missingness...
+
+```{r}
+df %>%
+  inspectdf::inspect_na() %>%
+  show_plot()
+```
+
+and impute...
+
+```{r}
+set.seed(101)
+imp <- mice::mice(df, m = 1, maxit = 1, print = F)
+df <- complete(imp)
+df$OUTSTANDINGFEE <- as.numeric(df$OUTSTANDINGFEE)
+```
+
+Seventh, and last, check correlation. 
+
+```{r}
+df %>%
+  GGally::ggcorr(label = TRUE, 
+         label_alpha = TRUE,
+         hjust=.9,
+         size=3.5,
+         layout.exp=3,
+         method = c("pairwise.complete.obs", "spearman")) +
+  labs(title="Correlation Matrix")
+```
+
+The threshold for multicolinearity of .7 not achieved. Regradless, multicolinearity is only important between predictors. 
+
+
+## Model 
+
+Split.
+
+```{r}
+library(caTools)
+set.seed(101) #The seed number does not matter. Any number will do.
+sample <- sample.split(df, SplitRatio = .6)
+test <- subset(df, sample == TRUE)
+train <- subset(df, sample == FALSE)
+```
+
+Build and interpret the model.
+
+```{r}
+set.seed(101)
+model <- glm(LEGALOUTCOME ~ ., data = train, family = binomial(link="logit")) 
+summ(model, exp = T, vifs = T, digits = 4)
+```
+
+Model: $\ y=907+1.67*LicensingViolation+10.98*OccupancyViolation+0.98*OutstandingFee+0.81*MonthsOpen$
+
+For the outcome variable, 0 is not penalized and 1 is penalized.
+Reference category for DEFICIENCYTEXT is RegistrationViolation.
+
+Interpretation:
+* A licensing violation is 66% more likely to result in a penalty than an incomplete registration violation controlling for all other variables. Not staistically significant.
+* An occupancy limit violation is 11x (1,098%) more likely to result in a penalty than an incomplete registration violation.
+* For every $1 increase in outstanding fee the likelihood of penalty decreases by 1% (1-.989).
+* For every month that the violation is open the likelhood of penalty decreases by 19% (1-.81).
+
+
+Third, conduct graphical analysis. Analyze coefficients...
+
+```{r}
+plot_summs(model, plot.distributions = TRUE, exp = T)
+```
+
+..and look at the relationship between predictors and the outcome.
+
+```{r}
+a <- effect_plot(model, pred = DEFICIENCYTEXT, interval = T, cat.geom = "line")
+b <- effect_plot(model, pred = OUTSTANDINGFEE, interval = T, rug = T)
+c <- effect_plot(model, pred = MONTHSVIOLATIONOPEN, interval = T, rug = T)
+
+gridExtra::grid.arrange(a,b,c, ncol = 2)
+
+```
+
+Fourth, pull in fitted and residual values...
+
+```{r}
+train$fitted <- model$fitted.values
+train$residuals <- model$residuals
+```
+
+...and query the model.
+
+* 
+
+
+Fifth, evaluate goodness of fit.
+
+
+## Compare
+
+
+
+
+
+
+
+
+
+Third, we'll analyze the __deviance__. The null deviance says how well the model fits when only considering the dependent variable. The residual deviance says how well the model fist by looking at all the independent variables. 
+
+You can see that there's a big difference between the null and residual Deviance. This is good... it means that adding independent variables increased the model's ability to explain variation in the dependent variable. 
+
+An ANOVA table will tell us the effect on deviance by adding each variable, one at a time. That way, you'll be able to see which variables actually mattered.
+
+```{r}
+library(stats)
+anova(model, test = "Chisq")
+```
+
+We can see that each of the independent variables significantly impacted the deviance table, because the p-values of each is far lower than a significance level of 0.05. The lower the p-value, the greater the effect of that variable on the model.
+
+Fourth, let's understand the __Fisher Scoring iterations__. In the same way that traditional linear regressions use an ordinary least squares algorithm to fit the model, logistic regression uses a maximum likelihood algorithm. The Fisher Score states how many times that algorithm looped to give us our model. 
+
+Fifth, and last, the __AIC (Akaike’s Information Criteria)__ is a measure of model parsimony. Parsimonious = Efficient = Good. The AIC is used to compare parsimony of one model to another. So if we ran other models with different independent variables, we'd compare AICs. The lowest AIC would indicate  the best (most parsimonious) model. For more info, check out [this awesome discussion](https://www.r-bloggers.com/how-do-i-interpret-the-aic/) on r-bloggers.com.    
+
+
+
+\newpage
+## Run Predictions and Test Goodness of Fit
+
+What's the model good for if not making inferences or predictions? I'd love to know, in this case, the likelihood of court penalty given the characteristics in my model.
+
+To paint this picture, I'm going to run predictions using the predict() function, then build a confusion matrix, which compares the observed values to predicted values as a goodness of fit measure.
+
+```{r}
+predictions <- predict(model, type="response")
+table(test$PENALIZED, predictions > 0.5) #Use .5 as your odds ratio threshold
+```
+
+In the matrix, we can see the instances when we got it right (top left, bottom right) and when we got it wrong. Look's like our model is doing a fairly good job predicting outcomes. Altogether, we predicted correctly `r scales::percent((893+213)/(893+213+132+209))` of the time. Not bad. 
+
+Now let's run an ROC (receiver operating characteristic) curve and get the corresponding AUC (area under the curve) value.
+
+```{r}
+library(ROCR)
+set.seed(13)
+predROCR <- prediction(predictions, test$PENALIZED)
+roc <- performance(predROCR, measure = "tpr", x.measure = "fpr") #tpr = True Positive Rate, fpr = False Positive Rate 
+auc <- performance(predROCR, measure = "aux")
+plot(roc, colorize = TRUE)
+abline(a=0, b=1)
+```
+
+In the curve above, we want the ROC to be as far from the diagonal line as possible. We also want the AUC to be as big as possible. We can see that the ROC curve does not resemble the diagonal line, which is good. Also, our AUC is `r scales::percent(auc@y.values[[1]])`, a solid value by any standard.  
+
+
+
+
+\newpage
+## Common Errors
+
+Keep in mind these common mistakes. Make sure you've accounted for all of them during the course of your analysis. 
+
+1. Class Bias: You must split the test and train data proportionally. For example, in our data set, we made sure that the test and train data had equal proportions of both levels of the independent variable, which we designated as the "Penalized" level and "Not Penalized" level. 
+2. Using the Wrong Iteration Algorithm: The default algorithm for generalized linear models is the Fisher Score (maximum likelihood)> However, when you have rare cases in the dependent variable, [use different iteration algorithms](https://www.researchgate.net/post/Fishers_Scoring_Algorithm), such as the Firth method. 
+3. Multicolinearity: Make sure the independent variables aren't correlated beyond a correlation coefficient of 4.
+4. Overfitting: Don't control for too many variables! Be smart, and add variables to your model sparingly. 
+
+
+\newpage
+## Summary
+
+Logistic regression is a beast! 
+
+Just to recap: Anytime you want to know "whether or not" something is likely to happen, use logistic regression. 
+
+Make sure you take the following steps, while always considering the common errors listed above. 
+
+1. Conduct exploratory data analysis. Thorough exploration at the start will save you a lot of headache. Check the structure, missing values, categorical variables, numerical variables, dates, and locations.
+2. Check for correlations. Highly correlated variables should not be regressed against each other.
+3. Split the data into test and train. I use 60/40, but I've also seen a lot of people use 80/20. Your choice.
+4. Run the model.
+5. Interpret the model. Make sure you __really__ understand log odds, or else go ahead and exponentiate so you can just interpret the coefficients in terms of the actual odds ratio. 
+6. Run predictions and check for goodness of fit. I purposely left out the Hosmer Lemeshow Test... there's some conversation online about it being outdated. I find that checking our prediction accuracy rate via the confusion matrix is the most meaningful.
+7. Iterate. Iterate. Iterate.
+
+
+## Sources
+* https://datascienceplus.com/perform-logistic-regression-in-r/
+* https://www.datacamp.com/community/tutorials/logistic-regression-R
+* https://towardsdatascience.com/simply-explained-logistic-regression-with-example-in-r-b919acb1d6b3
+* https://www.theanalysisfactor.com/r-glm-model-fit/
+* http://r-statistics.co/Logistic-Regression-With-R.html
+* https://webfocusinfocenter.informationbuilders.com/wfappent/TLs/TL_rstat/source/LogisticRegression43.htm
+* https://www.r-bloggers.com/how-do-i-interpret-the-aic/
+* https://www.analyticsvidhya.com/blog/2015/11/beginners-guide-on-logistic-regression-in-r/
+* effect_plot in jtools: https://cran.r-project.org/web/packages/jtools/vignettes/effect_plot.html 
+
+
+
+
+

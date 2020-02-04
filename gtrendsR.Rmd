@@ -1,0 +1,68 @@
+---
+title: "gtrendsR"
+author: "Nick Broussard"
+date: "12/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(gtrendsR)
+library(gganimate)
+library(ggimage)
+library(gifski)
+library(usethis)
+library(lubridate)
+```
+
+Build color palettes.
+```{r}
+pink <- "#FF8DC6"
+blue <- "#56C1FF"
+yellow <- "#FAE232"
+```
+
+Pull in data. 
+```{r}
+bachTrends <- gtrends(c("Bachelor in Paradise", "The Bachelor", "The Bachelorette"), geo = "US")
+bachTrendsInterest <- bachTrends$interest_over_time
+```
+
+Convert hits to numeric and filter date to 2017 or greater. 
+```{r}
+trends <- bachTrendsInterest %>%
+  filter(year(date) > 2016) %>%
+  mutate(hits = as.numeric(as.character(hits)),
+         date = ymd(date))
+```
+
+Frequency plot by keyword.
+```{r}
+p <- ggplot(trends) +
+  geom_line(aes(x = date, y = hits, color = keyword, group = keyword)) +
+  scale_color_manual(values=c( yellow, blue, pink)) +
+  theme_classic() +
+  theme(legend.position="bottom") +
+  labs(title = "The Bachelor Franchise Popularity ",
+       subtitle = "Using data to find the most dramatic season ever!",
+       caption = "Source: @littlemissdata", 
+       x = "Date", y = "Hits") 
+p
+```
+
+Create animation. 
+```{r}
+#Build the base graphic using the base plot.
+t <- p +
+  transition_reveal(as.numeric(date))
+
+#Build the gif using the base graphic.
+t <- animate(t, end_pause = 25, width = 800, height = 400, fps = 8)
+gif
+
+#Save the gif
+anim_save("Bachelor trands", gif)
+```
+
