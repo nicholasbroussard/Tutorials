@@ -137,10 +137,11 @@ effect_plot(model, pred = MONTHSVIOLATIONOPEN, interval = T, rug = T)
 #4) Analyze residuals.
 
 train$residuals <- model$residuals
+train$fitted <- model$fitted.values
 arm::binnedplot(fitted(model), residuals(model, type="response"))
 
 #5) Analyze predicted (fitted) values by querying the model.
-train$fitted <- model$fitted.values
+
 #What are the odds of penalty for cases open two months? 
 train %>% filter(MONTHSVIOLATIONOPEN == 2) %>% summarise(percent(mean(fitted)))
 #What are the odds of penalty for any given licensing violation? 

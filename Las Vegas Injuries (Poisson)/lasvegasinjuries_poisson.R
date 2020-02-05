@@ -1,13 +1,13 @@
 ---
-title: "Analyzing Las Vegas' Car Accident Injuries"
+  title: "Analyzing Las Vegas' Car Accident Injuries"
 subtitle: "Poission Regression in R"
 author: "Nick Broussard"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 output: 
   html_document:
-    code_folding: hide
+  code_folding: hide
 ---
-```{r setup, include=FALSE}
+  ```{r setup, include=FALSE}
 
 library(tidyverse)
 library(kableExtra)
@@ -280,6 +280,6 @@ anova(model, model_quasi, model_nb)
 ## Sources
 
 * Negative Binomial Regression: https://stats.idre.ucla.edu/r/dae/negative-binomial-regression/
-* Deviance Goodness of Fit: https://thestatsgeek.com/2014/04/26/deviance-goodness-of-fit-test-for-poisson-regression/
-* Overdispersion Tests: https://stats.stackexchange.com/questions/66586/is-there-a-test-to-determine-whether-glm-overdispersion-is-significant
+  * Deviance Goodness of Fit: https://thestatsgeek.com/2014/04/26/deviance-goodness-of-fit-test-for-poisson-regression/
+  * Overdispersion Tests: https://stats.stackexchange.com/questions/66586/is-there-a-test-to-determine-whether-glm-overdispersion-is-significant
 
