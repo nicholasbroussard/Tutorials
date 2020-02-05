@@ -1,0 +1,64 @@
+---
+title: "usmaps"
+author: "Nick Broussard"
+date: "12/9/2019"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(gtrendsR)
+library(usmap)
+``` 
+
+### Wrangling
+```{r}
+#Specific color var for tutorial.
+orange <- "#C9592E" 
+
+#Pull in a list of 7 dfs.
+thanksgiving <- gtrends("thanksgiving",#The keyword we're looking for. We can literally ask for anything that people may type into google.  
+                        geo = "US", time = "now 1-d")
+
+#Select and name the df interest_by_region
+thanksgivingStates <- thanksgiving$interest_by_region
+
+#Add a state fips code column by passing state name to fips().
+thanksgivingStates$fips <- fips(thanksgivingStates$location)
+```
+
+### Heat Map/Choropleth of the US
+```{r}
+plot_usmap(data = thanksgivingStates,
+           values = "hits", #The variable to be plotted/choroplethed
+           color = "orange",
+           labels = F) +
+  scale_fill_continuous(low = "white",
+                        high = orange,
+                        name = "Popularity",
+                        label = scales::comma) +
+  theme(legend.position = "right",
+        panel.background = element_rect(color = "black")) +
+    labs(title = "T-Giving Google Popularity \nby State",
+         caption = "Source: @littlemissdata")
+```
+
+### Heat Map of Specific States
+```{r}
+plot_usmap(data = thanksgivingStates %>% filter(location == "Texas" | location == "Oklahoma" | location == "New Mexico"), 
+           values = "hits") +
+  scale_fill_continuous( low = "white", high = orange, 
+                         name = "Popularity", label = scales::comma) + 
+  theme(legend.position = "right") + 
+  theme(panel.background = element_rect(colour = "black")) + 
+  labs(title = "US East Coast Popularity of Thanksgiving Google Search", caption = "Source: @littlemissdata")
+```
+
+
+### Sources
+* https://www.littlemissdata.com/blog/usmap
+* https://cran.r-project.org/web/packages/usmap/usmap.pdf

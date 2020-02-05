@@ -1,0 +1,147 @@
+---
+title: "Chi Squared Tutorial"
+output: 
+  html_document:
+    code_folding: hide
+    
+---
+```{r, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+## What's the Deal with Chi Square(d)?
+
+The Chi Squared Test is used for two different, though related, purposes. 
+
+1. Goodness of Fit: 
+  + The Chi Squared Goodness of Fit Test will tells us if observed values are associated with expected values. 
+  + It can only be used when all expected values are at least 5.
+  + H0 = There is no difference between expected and observed values.
+  + H1 = There is a difference between expected and observed values. 
+2. Test for Independence:
+  + #The Chi Squared Test for Independence analyzes dependence between two variables.
+  + Variables must be categorical. 
+  + Only applied when the expected frequency of any cell is at least 5.
+  + H0 = Variables are independent. Therefore, there is no difference between expected and observed values.
+  + HA = Variables are dependent. There is a difference between expected and observed values.
+3. Both Tests:
+  + If p-value of test statistic is < 0.05, we reject H0. If p >= 0.05, we fail to reject H0.
+  + They are ["very sensitive to sample size. With a large enough sample, even trivial relationships can appear to be statistically significant."](https://soc.utah.edu/sociology3112/chi-square.php)
+  + We're basically just testing for correlation. But while normal correlation tests look at the relationship between sets of observed values, this looks at the relationship between expected and observed values. 
+
+
+
+### Goodness of Fit.
+
+The Johnson Wildflower Center says that the ratio of hydrangeas in the spring is 1/2 purple, 1/3 blue, 1/6 white. I'm suspicious, so during a spring month I go out and count the number of red, yellow, and white tulips. Observed values from my tulip sample are 81 purple, 50 blue, 27 white. Is there a significant difference between the expected tulip ratio and the ratio I observed?
+
+```{r}
+hydrangea_obs <- c(81, 50, 27)
+chisq.test(hydrangea_obs, p = c(1/2, 1/3, 1/6)) 
+```
+
+The p-value of the test statistic is 0.9037, which is greater than our significance level of 0.05. Therefore, we fail to reject H0. We'll assume, based on this sample, that the proportional ratio of tulips is 1/2 to 1/3 to 1/6, as originally stated by the Wildflower Center.  
+
+This example was inspired by [this article]. (#http://www.sthda.com/english/wiki/chi-square-goodness-of-fit-test-in-r
+)
+
+
+### Test for Independence
+
+In this case, we have two categorical variables, each with multiple levels. 
+
+```{r}
+housetasks <- read.delim("http://www.sthda.com/sthda/RDoc/data/housetasks.txt", row.names = 1)
+library(gplots)
+```
+
+The first variable lists chores completed in a home. The second variable states who completed each task: Husband, wife, jointly, or alternating. I want to know if these variables are dependent (correlated) or independent (not correlated).
+
+First, lets graphically analyze the data.
+
+```{r}
+dt <- as.table(as.matrix(housetasks)) #Transform df into a table.
+balloonplot(t(dt), #t() transposes the orientation
+            main="housetasks", 
+            ylab="", 
+            xlab="", 
+            label = FALSE, 
+            show.margins = FALSE)   #This turns off the auto row and column sums
+```
+
+```{r}
+library(graphics)
+mosaicplot(dt, #Dataset
+           main="housetasks", #The primary grouping variable
+           shade = TRUE, #Color the graph
+           las=2) #Make the labels vertical
+```
+
+Both graphics shows us that, for instance, the wife does much more laundry while the husband does many more repairs. 
+
+So, before we do the Chi Square Test, remember that if the two variables are independent (not correlated), we can't draw predictive (expected value) conclusions. If dependent, we __can__ draw predictive conclusions. 
+
+```{r}
+chisq <- chisq.test(housetasks) 
+chisq
+```
+ 
+The test statistic is 1,944 and its p-value is super tiny. We'll therefore reject the null hypothesis. The columns and rows are dependent, and we can make predictive estimates.   
+
+### Observed Values
+```{r}
+chisq$observed
+```
+
+### Expected Values
+```{r}
+round(chisq$expected, 0) #Expected vales
+```
+
+Now we can test the residuals to see how much each cell contributes to the test statistic.
+
+```{r}
+resid <- round(chisq$residuals, 2) #Residuals
+contrib <- formattable::percent(chisq$residuals^2/chisq$statistic)
+contrib
+```
+
+The rows and cells are dependent, but the dependency is due largely to just a few variables:
+
+* Wife + Laundry = `r contrib["Laundry", "Wife"]`
+* Jointly + Holidays = `r contrib["Holidays", "Jointly"]`
+* Husband + Repairs = `r contrib["Repairs", "Husband"]`
+
+This example was an elaboration of an article found [here](#http://www.sthda.com/english/wiki/chi-square-test-of-independence-in-r).
+
+Another (short) example that I enjoyed was found [here](https://www.youtube.com/watch?v=i-pRb7dNakE). It asked if vaccines and the flu were correlated.
+
+```{r}
+x <- matrix(c(24, 289, 9, 100, 13, 565), nrow=2)
+library(kableExtra)
+kable(x)
+```
+
+
+```{r}
+chisq.test(x) 
+```
+
+The test statistic is 17.313 at very low p value. Reject the null. The variables are dependent. 
+
+### Observed Values
+```{r}
+chisq$observed
+```
+
+### Expected Values
+```{r}
+chisq$expected
+```
+
+### Residuals 
+```{r}
+formattable::percent(chisq$residuals^2/chisq$statistic, 3)
+```
+
+
