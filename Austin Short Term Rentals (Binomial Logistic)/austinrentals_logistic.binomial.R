@@ -1,17 +1,17 @@
 library(tidyverse)
 library(inspectdf) #inspect_na(), inspect_num()
-library(kableExtra)
 library(summarytools)
 library(scales) #percent
 library(data.table)
 library(jtools) #summ(), export_summs()
 library(interactions) #cat_plot(), interact_plot()
 
-#A) EXPLORE AND CLEAN
+#A) EDA
 
 #1) Read in the data.
 
-df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/logistic.binomial_rentals_austin.csv")
+df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/Austin%20Short%20Term%20Rentals%20(Binomial%20Logistic)/austinrentals_logistic.binomial.csv",
+            stringsAsFactors = F)
 #https://data.austintexas.gov/City-Government/Short-Term-Rental-Legal-Outcomes/xfmy-m22z
 
 #2) Select variables.
@@ -124,7 +124,7 @@ summ(model, exp = T, vifs = T, digits = 4)
 #A licensing violation is 66% more likely to result in a penalty than an incomplete registration violation controlling for all other variables. Not staistically significant.
 #An occupancy limit violation is 11x (1,098%) more likely to result in a penalty than an incomplete registration violation.
 #For every $1 increase in outstanding fee the likelihood of penalty decreases by 1% (1-.989).
-#For every month that the violation is open the likelhood of penalty decreases by 19% (1-.81).
+#For every month that the violation is open the likelihood of penalty decreases by 19% (1-.81).
 
 #3) Graphical analysis. Analyze coefficients the relationship between predictors and the outcome.
 
@@ -169,32 +169,65 @@ table(test$LEGALOUTCOME, test$fitted > .5)
 
 
 
-
 #c) COMPARE
 
-#1) Build another model with fewer predictors.
+#Model with fewer predictors.
 
 set.seed(101)
 model2 <- glm(LEGALOUTCOME ~ OUTSTANDINGFEE + MONTHSVIOLATIONOPEN, data = train, family = binomial(link = "logit"))
 summ(model2, exp = T, digits = 4, vifs = T)
 
-#3) Goodness of fit.
+#Goodness of fit.
 
 DescTools::PseudoR2(model2) #McFadden's
 DescTools:::PseudoR2(model2, which = "CoxSnell") 
 DescTools::PseudoR2(model2, which = "Nagelkerke")
 
-#4) Compare model side-by-side.
+train$DEFICIENCYTEXT <- relevel(as.factor(train$DEFICIENCYTEXT), ref = "Occupancy Limit Violation")
+set.seed(101)
+model3 <- glm(LEGALOUTCOME ~ DEFICIENCYTEXT + OUTSTANDINGFEE + MONTHSVIOLATIONOPEN, 
+             data = train, 
+             family = binomial(link="logit")) 
+summ(model3, exp = T, vifs = T, digits = 4)
 
-export_summs(model, model2, 
+
+#Compare models side-by-side.
+
+export_summs(model, model2, model3, 
              scale = T, 
              error_format = "[{conf.low},{conf.high}]") #Include confidence intervals for each variable.
 plot_summs(model, model2, exp = T, partial.distributions = T)
 
 
 
-#D) ANALYZE AND INTERPRET
+#D) FINDINGS
 
+#If you can drag out the case, you pay less.
+#If your fee is higher, youre less likely to be penalized. 
+
+ggplot(train, aes(x=MONTHSVIOLATIONOPEN, y = LEGALOUTCOME)) +
+  geom_point() +
+  stat_smooth(method = "glm", method.args=list(family="binomial"), se = F)
+
+#Most likely, residential AirBNB violators are being punished while corporations delay and defelect and never pay fines. 
+#If it's the big corporations AirBNBing complexes, not the residential customer, then why is the little guy being punished?
+#Fines wouldn't matter to big corporations anyway, but they operate with impunity to local ordinances. 
+#This encourages further problematic behavior, empowering corporations and businesses to flout local requirements.
+
+#Money potentially lost in uncollected penalties.
+df %>%
+  filter(LEGALOUTCOME==0) %>%
+  summarize(dollar(sum(OUTSTANDINGFEE)))
+
+train <- train %>%
+  mutate(FeeLevel = ifelse(OUTSTANDINGFEE<.5*max(OUTSTANDINGFEE), "Low", "High"),
+         PendingPeriod = ifelse(MONTHSVIOLATIONOPEN<.5*max(MONTHSVIOLATIONOPEN), "Quick to Court","Dragged Out"))
+
+#Likelihood of penalty for low fee v high fee.
+train %>%
+  filter()
+
+#Likelihood of penalty if you drag it out. 
 
 
 #E) SOURCES
