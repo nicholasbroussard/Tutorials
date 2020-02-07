@@ -1,38 +1,32 @@
 library(tidyverse)
 library(inspectdf) #inspect_na(), inspect_num()
-library(kableExtra)
-library(scales)
+library(scales) #percent()
 library(data.table)
 library(summarytools) #descr() - for summaries of numerical variables
 library(Metrics) #rmse()
-library(caret) #RMSE (root mean squared error), R2 (r squared)
 library(jtools) #summ(), export_summs()
 library(interactions) #cat_plot(), interact_plot()
-library(outliers) #outlier(), scores()
 
-#A) EXPLORE AND CLEAN
-
-#Read in the df.
-
-df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/Austin%20ECAD/austinecad_linear.multiple.csv", stringsAsFactors = F)
+#A) EDA
+#1) Read in the df.
+df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/Austin%20ECAD%20(Multiple%20Linear)/austinecad_linear.multiple.csv", stringsAsFactors = F)
 
 #2) Select variables.
-
 df <- df %>%
-  select("Average Monthly kWh", "ECAD Year Built", "Average Apt Size", "ECAD R Value", "ECAD Number of Floors") %>%
+  select("Average Monthly kWh", "ECAD Year Built", "Average Apt Size", "ECAD R Value", "ECAD Number of Floors", "ECAD Percent Duct Leakage") %>%
   #Let's the variables easier-to-read names.
-  setnames(old = c("Average Monthly kWh", "ECAD Year Built", "Average Apt Size", "ECAD R Value", "ECAD Number of Floors"),
-           new = c("Energy",  "YearBuilt", "Size", "RValue", "Floors"))
+  setnames(old = c("Average Monthly kWh", "ECAD Year Built", "Average Apt Size", "ECAD R Value", "ECAD Number of Floors","ECAD Percent Duct Leakage"),
+           new = c("Energy",  "YearBuilt", "Size", "RValue", "Floors", "DuctLeakage")) %>%
+  mutate(EnergyUsePerSft = Energy/Size)
 
 #3) Look at the df's structure and convert vars as needed.
-
 glimpse(df)
 
 df$YearBuilt <- as.numeric(as.character(df$YearBuilt))
 df$Floors <- as.factor(as.numeric(df$Floors))
+df$YearBuilt[df$YearBuilt==0] <- NA
 
 #4) Categoricals
-
 df %>%
   inspect_cat() %>%
   show_plot()
@@ -44,7 +38,6 @@ df <- df %>%
   filter(Floors == "1" | Floors == "2" | Floors == "3" |  is.na(Floors))
 
 #5) Numerics.
-
 df %>%
   descr(transpose = T,
         stats = "fivenum") 
@@ -58,21 +51,24 @@ c <- ggplot(df, aes(Size)) +
   geom_histogram(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30)
 d <- ggplot(df, aes(RValue)) +
   geom_histogram(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30)
-gridExtra::grid.arrange(a,b,c,d)
+e <- ggplot(df, aes(DuctLeakage)) +
+  geom_histogram(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30)
+gridExtra::grid.arrange(a,b,c,d,e)
 
 par(mfrow = c(2,2))
 energy_outliers <- boxplot(df$Energy)$out
 yearbuilt_outliers <- boxplot(df$YearBuilt)$out
 size_outliers <- boxplot(df$Size)$out
 rvalue_outliers <- boxplot(df$RValue)$out
+ductleakage_outliers <- boxplot(df$DuctLeakage)$out
 
 df[which(df$Energy %in% energy_outliers),] <- NA
 df[which(df$YearBuilt %in% yearbuilt_outliers),] <- NA
 df[which(df$Size %in% size_outliers),] <- NA
 df[which(df$RValue %in% rvalue_outliers),] <- NA
+df[which(df %>% ductleakage_outliers),] <- NA
 
 #6) Missingness. Impute as necessary.
-
 df %>%
   inspect_na() 
 library(mice)
@@ -81,7 +77,6 @@ imp <- mice(df, m = 1, maxit = 1, print = F)
 df <- complete(imp)
 
 #7) Correlation.
-
 df %>%
   GGally::ggcorr(label = TRUE, 
          label_alpha = TRUE,
@@ -91,16 +86,14 @@ df %>%
          method = c("pairwise.complete.obs", "spearman")) +
   labs(title="Correlation Matrix")
 
-
 #7) Variance.
 #Wide variances violate homoscedasticity. Scale coefs in model and add vifs.
-
 df %>%
-  summarise(Energy = var(Energy), YearBuilt = var(YearBuilt), Size = var(Size), RValue = var(RValue))
+  summarise(Energy = var(Energy), YearBuilt = var(YearBuilt), Size = var(Size), RValue = var(RValue), DuctLeakage = var(DuctLeakage))
 
 
 
-#B) MODEL
+#B) MODELING
 
 #1) Split the data. 
 
@@ -119,7 +112,7 @@ summ(model,
      scale = T, 
      vifs = T) #Variable Inflation Factors
 
-#y=547+26*YearBuilt+95*Size-3.5*RValue+5*2ndFloor+44*3rdFloor
+#y=556+36.5*YearBuilt+88*Size+3*RValue+6*2ndFloor+32*3rdFloor
 
 # 1st floor unit energy use is $\ 547kWh \over month$ ($\ y=547$). 
 # 1 year decrease in age is associated with increased energy use of $\ 26kWh \over month$. Specifically, a 1st floor unit that's 1 year newer than another unit is expected to use $\ 573kWh \over month$ ($\ y=547+26*1$). 
@@ -132,11 +125,11 @@ summ(model,
 
 plot_summs(model, plot.distributions = T, scale = T)
 
-aa <- effect_plot(model, pred = YearBuilt, interval = T, plot.points = T, rug = T)
-bb <- effect_plot(model, pred = Size, interval = T, plot.points = T, rug = T)
-cc <- effect_plot(model, pred = RValue, interval = T, plot.points = T, rug = T)
-dd <- effect_plot(model, pred = Floors, interval = T, cat.geom = "line") #Categorical predictor
-gridExtra::grid.arrange(aa,bb,cc,dd)
+a <- effect_plot(model, pred = YearBuilt, interval = T, plot.points = T, rug = T)
+b <- effect_plot(model, pred = Size, interval = T, plot.points = T, rug = T)
+c <- effect_plot(model, pred = RValue, interval = T, plot.points = T, rug = T)
+d <- effect_plot(model, pred = Floors, interval = T, cat.geom = "line") #Categorical predictor
+gridExtra::grid.arrange(a,b,c,d)
 
 library(olsrr)
 ols_plot_cooksd_chart(model) 
@@ -183,7 +176,7 @@ df %>%
 
 
 
-#C) COMPARE
+#C) COMPARISONS
 
 #Analyze the effects of predictor varibales on each other. Here, we focus on Size.
 
@@ -196,7 +189,6 @@ gridExtra::grid.arrange(a,b,c,d)
 #Parallel lines indicate no interaction.
 
 #Build and interpret model. Main effects go away for interactive model.
-
 set.seed(101)
 model2 <- lm(Energy ~ YearBuilt + Size + RValue + Floors + Size:YearBuilt, data = train)
 summ(model2, scale = T, confint = T, digits = 2, vifs = T)
@@ -205,18 +197,74 @@ summ(model2, scale = T, confint = T, digits = 2, vifs = T)
 #The average energy use is $\ 554kWh \over month$ ($\ y=554 $).    
 #The effect of YearBuilt on Energy decreases by $\ 15.87kWh \over month $  for every 1-unit increase in RValue.
 #Likewise, the effect of YearBuilt on Energy decreases by $\ 15.87kWh \over month $ for every 1 additional year. 
-  
-#Compare.
 
-export_summs(model, model2, 
+
+#Build a model w/o duct leakage.
+set.seed(101)
+model3 <- lm(Energy ~ YearBuilt + Size + RValue + Floors, data = train)
+summ(model3, scale = T, confint = T, digits = 2, vifs = T)
+
+#Build models pre1990 and 1990topresent.
+train_pre1990 <- train %>%
+  filter(YearBuilt<1990)
+train_1990topresent <- train %>%
+  filter(YearBuilt>=1990)
+set.seed(101)
+model4 <- lm(EnergyUsePerSft ~ YearBuilt + Size + RValue + Floors, data = train_pre1990)
+summ(model4, scale = T, confint = T, digits = 2, vifs = T)
+set.seed(101)
+model5 <- lm(EnergyUsePerSft ~ YearBuilt + Size + RValue + Floors, data = train_1990topresent)
+summ(model5, scale = T, confint = T, digits = 2, vifs = T)
+
+#Model with dv as EnergyUsePerSft
+set.seed(101)
+model6 <- lm(EnergyUsePerSft ~ YearBuilt + Size + RValue + Floors + DuctLeakage, data = train)
+summ(model6, scale = T, confint = T, digits = 4, vifs = T)
+
+#Compare all models.
+export_summs(model, model2, model3, model4, model5,model6,
+             exp = T,
              scale = T, 
+             digits = 4,
              error_format = "[{conf.low},{conf.high}]") #Include confidence intervals for each variable.
-
 plot_summs(model, model2, scale = T, plot.distributions = T, model.names = c("Without Interation", "With Interaction"))
 
 
 
-#D) SOURCES
+#D) FINDINGS
+
+#Newer units consume more energy, even after controlling for size, rvalue, number of floors, and duct leakage.
+#Larger units are significantly more likely to consumer far more energy, even after controlling for age, rvalue, floors, and duct leakage.
+
+
+a <- ggplot(df %>% filter(YearBuilt>1955), aes(YearBuilt, Energy)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "Energy Use Per Unit Over Time", y = "kWh")
+b <- ggplot(df %>% filter(YearBuilt>1955), aes(YearBuilt, EnergyUsePerSft)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "Energy Use Per Sft Over Time", y = "kWh")
+gridExtra::grid.arrange(a,b, ncol=2)
+
+ggplot(df, aes(Size, Energy)) +
+  geom_point() +
+  geom_smooth(method = "loess")
+
+ggplot(df, aes(Size, EnergyUsePerSft)) +
+  geom_point() +
+  geom_smooth(method = "loess")
+
+#What's the average energy use for a 400sft unit v 800sft unit?
+train %>%
+  filter(Size >= 400 & Size <= 500) %>%
+  summarize(mean(Fitted))
+
+train %>%
+  filter(Size >= 800 & Size <= 900) %>%
+  summarize(mean(Energy))
+
+#E) SOURCES
 #Tools for Summarizing and Vizualising Regression Models: https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
 #Removing Outliers: https://rpubs.com/Mentors_Ubiqum/removing_outliers
 #Cook's D: https://cran.r-project.org/web/packages/olsrr/vignettes/influence_measures.html
