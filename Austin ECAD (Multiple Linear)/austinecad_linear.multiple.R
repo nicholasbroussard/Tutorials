@@ -76,7 +76,7 @@ set.seed(101)
 imp <- mice(df, m = 1, maxit = 1, print = F)
 df <- complete(imp)
 
-#7) Correlation.
+#8) Correlation.
 df %>%
   GGally::ggcorr(label = TRUE, 
          label_alpha = TRUE,
