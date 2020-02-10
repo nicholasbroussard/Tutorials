@@ -7,7 +7,6 @@ library(jtools) #summ(), export_summs()
 library(interactions) #cat_plot(), interact_plot()
 
 #A) EDA
-
 #1) Read in the data.
 
 df <- fread("https://raw.githubusercontent.com/nicholasbroussard/tutorials/master/Austin%20Short%20Term%20Rentals%20(Binomial%20Logistic)/austinrentals_logistic.binomial.csv",
@@ -214,12 +213,8 @@ df %>%
   summarize(dollar(sum(OUTSTANDINGFEE)))
 
 train <- train %>%
-  mutate(FeeLevel = ifelse(OUTSTANDINGFEE<.5*max(OUTSTANDINGFEE), "Low Fee", "High Fee"),
+  mutate(FeeLevel = ifelse(OUTSTANDINGFEE<.5*max(OUTSTANDINGFEE), "Low", "High"),
          PendingPeriod = ifelse(MONTHSVIOLATIONOPEN<.5*max(MONTHSVIOLATIONOPEN), "Pay it ASAP","Delay Payment"))
-
-#Likelihood of penalty for low fee v high fee.
-train %>%
-  filter()
 
 #Fees per deficiency.
 df %>%
@@ -243,57 +238,40 @@ train %>%
   summarize(percent(mean(fitted)))
 #Have a low fee...
 train %>%
-  filter(FeeLevel == "Low Fee") %>%
+  filter(FeeLevel == "Low") %>%
   summarize(percent(mean(fitted)))
 #Have a high fee...
 train %>%
-  filter(FeeLevel == "High Fee") %>%
+  filter(FeeLevel == "High") %>%
   summarize(percent(mean(fitted)))
 
 
-graph <- tibble(action = c("Easy to Pay", "Low Fee","Hard to Pay","High Fee"),
+graph1 <- tibble(action = c("Pay it ASAP", "Inexpensive"),
                  percent = c(train %>% filter(PendingPeriod == "Pay it ASAP") %>% summarize(mean(fitted)),
-                             train %>% filter(FeeLevel == "Low") %>% summarize(mean(fitted)),
-                             train %>% filter(PendingPeriod == "Delay Payment") %>% summarize(mean(fitted)),
+                             train %>% filter(FeeLevel == "Low") %>% summarize(mean(fitted))),
+                 category = c("Payment Action", "Fee Level"),
+                 groups = c("Comply", "Comply"))
+
+graph2 <- tibble(action = c("Delay Payment","Expensive"),
+                 percent = c(train %>% filter(PendingPeriod == "Delay Payment") %>% summarize(mean(fitted)),
                              train %>% filter(FeeLevel == "High") %>% summarize(mean(fitted))),
-                 category = c("Payment Duration", "Fee Level","Payment Duration", "Fee Level"),
-                 groups = c("Comply", "Comply","Don't Comply", "Don't Comply"))
-graph$percent <- as.numeric(graph$percent)
+                 category = c("Payment Action","Fee Level"),
+                 groups = c("Comply", "Comply", "Don't Comply", "Don't Comply"))
 
-oddsgraph <- ggplot(graph, aes(x=action, y=percent, fill = category)) +
-  geom_col(color = "midnightblue", alpha = .8) +
-  scale_fill_brewer(palette = "Set2") +
-  scale_x_discrete(limits = c("Low Fee","High Fee","Easy to Pay", "Hard to Pay")) +
-  geom_text(aes(label = scales::percent(percent)), color = "midnightblue", vjust=-.2) +
-  labs(title = "Fined? Just Don't Pay It.", x="", y="Odds a Fine will be Paid", fill = "", subtitle = "If a fine is expensive, or hard to pay, it probably won't get paid.") +
-  theme(axis.text.y = element_blank(),
-        legend.position = "none",
-        axis.ticks.y = element_blank(),
-        plot.title = element_text(color = "grey17"),
-        axis.text = element_text(color = "grey17")) 
+graph1 <- tibble(graph1_action,graph1_category,graph1_groups,graph1_percent)
+graph2 <- tibble(graph2_action,graph2_category,graph2_groups,graph2_percent)
+graph1$graph1 <- as.numeric(x$Percent)
 
-graph2 <- tibble(money = c(df %>% filter(LEGALOUTCOME==0) %>% summarise(sum(OUTSTANDINGFEE)),
-                           df %>% filter(LEGALOUTCOME==1) %>% summarise(sum(OUTSTANDINGFEE))),
-                 legaloutcome = c("Not Collected","Collected"),
-                 category = c("fees", "fees"))
-graph2$money <- as.numeric(graph2$money)
-feegraph <- ggplot(graph2, aes(x=legaloutcome, y = money)) +
-  geom_col(alpha=.8, color = "midnightblue", fill = "cadetblue") +
-  coord_flip() +
-  scale_y_continuous(limits = c(0,3000000)) +
-  scale_x_discrete(limits = c("Not Collected","Collected")) +
-  labs(x = "", y = "", title = "Lost Earnings", subtitle = "The City only collected 15% of all fines levied in 2019.") +
-  geom_text(aes(label = scales::dollar(money)), color = "midnightblue", hjust = -.2) +
-  theme(axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        plot.title = element_text(color = "grey17"),
-        axis.text = element_text(color = "grey17"))
-
-gridExtra::grid.arrange(oddsgraph, feegraph, ncol = 2)  
-
-#Stack the second graph, and flip it (?)
-#Hard to pay = > certain number of months. 
-
+ggplot(x, aes(x=Categories, y=Percent, fill = Category)) +
+  geom_col() +
+  scale_x_discrete(limits = c("High","Low","Delay Payment","Pay it ASAP")) +
+  geom_text(aes(label = scales::percent(Percent)), color = "black", vjust=-.2) +
+  labs(title = "Just Don't Pay It", subtitle = "If you have a high fee, or just don't feel like \n
+       taking care of it, your odds of paying go way down.", fill = "", x="") +
+  facet_wrap(~Groups) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        axis.text.y = element_blank())
 
 #E) SOURCES
 #https://datascienceplus.com/perform-logistic-regression-in-r/
