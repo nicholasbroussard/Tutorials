@@ -55,6 +55,7 @@ e <- ggplot(df, aes(DuctLeakage)) +
   geom_histogram(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30)
 gridExtra::grid.arrange(a,b,c,d,e)
 
+#6) Outliers
 par(mfrow = c(2,2))
 energy_outliers <- boxplot(df$Energy)$out
 yearbuilt_outliers <- boxplot(df$YearBuilt)$out
@@ -68,7 +69,7 @@ df[which(df$Size %in% size_outliers),] <- NA
 df[which(df$RValue %in% rvalue_outliers),] <- NA
 df[which(df %>% ductleakage_outliers),] <- NA
 
-#6) Missingness. Impute as necessary.
+#7) Missingness. Impute as necessary.
 df %>%
   inspect_na() 
 library(mice)
@@ -86,7 +87,7 @@ df %>%
          method = c("pairwise.complete.obs", "spearman")) +
   labs(title="Correlation Matrix")
 
-#7) Variance.
+#9) Variance.
 #Wide variances violate homoscedasticity. Scale coefs in model and add vifs.
 df %>%
   summarise(Energy = var(Energy), YearBuilt = var(YearBuilt), Size = var(Size), RValue = var(RValue), DuctLeakage = var(DuctLeakage))
@@ -106,10 +107,10 @@ test <- subset(df, sample == F)
 #2) Run model and interpret.
 
 set.seed(101)
-model <- lm(Energy ~ ., data = train)
+model <- lm(Energy ~ YearBuilt + Size + RValue + Floors, data = train)
 summ(model,
      confint = T,
-     scale = T, 
+     scale = F, 
      vifs = T) #Variable Inflation Factors
 
 #y=556+36.5*YearBuilt+88*Size+3*RValue+6*2ndFloor+32*3rdFloor
