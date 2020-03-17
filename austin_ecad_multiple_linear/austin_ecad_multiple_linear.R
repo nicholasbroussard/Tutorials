@@ -37,7 +37,7 @@ ggplot(df, aes(x = Floors)) +
 df <- df %>%
   filter(Floors == "1" | Floors == "2" | Floors == "3" |  is.na(Floors))
 
-#5) Numerics.
+#5) Numerics. Histograms and boxplots (outliers). 
 df %>%
   descr(transpose = T,
         stats = "fivenum") 
@@ -55,7 +55,6 @@ e <- ggplot(df, aes(DuctLeakage)) +
   geom_histogram(color = "midnightblue", fill = "cadetblue", alpha = .7, bins = 30)
 gridExtra::grid.arrange(a,b,c,d,e)
 
-#6) Outliers
 par(mfrow = c(2,2))
 energy_outliers <- boxplot(df$Energy)$out
 yearbuilt_outliers <- boxplot(df$YearBuilt)$out
@@ -69,7 +68,7 @@ df[which(df$Size %in% size_outliers),] <- NA
 df[which(df$RValue %in% rvalue_outliers),] <- NA
 df[which(df %>% ductleakage_outliers),] <- NA
 
-#7) Missingness. Impute as necessary.
+#6) Missingness. Impute as necessary.
 df %>%
   inspect_na() 
 library(mice)
@@ -77,7 +76,7 @@ set.seed(101)
 imp <- mice(df, m = 1, maxit = 1, print = F)
 df <- complete(imp)
 
-#8) Correlation.
+#7) Correlation.
 df %>%
   GGally::ggcorr(label = TRUE, 
          label_alpha = TRUE,
@@ -87,7 +86,7 @@ df %>%
          method = c("pairwise.complete.obs", "spearman")) +
   labs(title="Correlation Matrix")
 
-#9) Variance.
+#8) Variance.
 #Wide variances violate homoscedasticity. Scale coefs in model and add vifs.
 df %>%
   summarise(Energy = var(Energy), YearBuilt = var(YearBuilt), Size = var(Size), RValue = var(RValue), DuctLeakage = var(DuctLeakage))
